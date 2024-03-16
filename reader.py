@@ -1,9 +1,9 @@
-from itertools import zip_longest
+import os
 import pandas as pd
 from PIL import Image
-from preprocessing import get_position, get_type, rotation
 import torch
-from torchvision import transforms
+from preprocessing import get_position, get_type, rotation
+
 
 def read_img(dl_image, model, processor, trocr_model):
     """Detects labels on a Driver's License (DL) image and recognizes text within them.
@@ -28,7 +28,18 @@ def read_img(dl_image, model, processor, trocr_model):
     labels = ['Address', 'Class', 'DOB', 'Exp date', 'First name', 'Issue date', 'Last name', 'License number', 'Sex']
     boxes = results[0].boxes
     data = {key: [] for key in labels}
+    preds = {int(box.cls):[] for box in boxes}
+    
+    i = -1
     for bounding_box in boxes:
+        i+=1
+        if bounding_box.conf[0]<0.6:
+            continue
+        preds[int(box.cls)].append((float(bounding_box.conf[0]), i))
+        
+    for key, value in preds.items():
+        idx = max(value, key=lambda x: x[0])[1]
+        bounding_box = boxes[idx]        
         x1, y1, x2, y2 = bounding_box.xyxy[0].tolist()
         crop_img = dl_image.crop((x1, y1, x2, y2)).convert("RGB")
         crop_img = crop_img.resize((crop_img.width * 4, crop_img.height * 4))
@@ -66,9 +77,8 @@ def text_extraction(file, class_model, rotate_model=None, model, processor, troc
     if get_type(class_model, file)=='id':
         rotated_image = rotation(rotate_model, file) if rotate_model else Image.open(file)
         data_read = read_img(rotated_image, model, processor, trocr_model)
-        max_length = max(map(len, data_read.values()))
         data_read['Folder'] = [file.split(os.path.sep)[-2]] * max_length
-        data = pd.DataFrame(list(zip_longest(*list(data_read.values()), fillvalue=None)), columns=list(data_read))
+        data = pd.DataFrame(data_read)
         return data if not data.empty else None
     else:
         return None
